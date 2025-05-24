@@ -57,7 +57,7 @@ DCS World/Logs/
 ### CSV Log Format
 
 The CSV file contains the following columns:
-- Timestamp
+- MissionTime (seconds since mission start)
 - Event (KILL, TAKEOFF, LANDING, etc.)
 - Killer name and details
 - Victim name and details
@@ -159,6 +159,11 @@ Example JSON structure:
 - Ensure the script path is correct in the trigger
 - Check DCS.log for Lua errors
 - Verify file permissions in the DCS folder
+
+### "Attempt to index global 'os' a nil value" Error
+- This is expected - DCS restricts the `os` module for security
+- The script uses `timer.getAbsTime()` instead of `os.date()`
+- File names use mission time instead of real-world timestamps
 
 ### No Logs Created
 - Check if `lfs.writedir()` path exists

@@ -5,9 +5,10 @@
 local CombatLogger = {}
 CombatLogger.version = "1.0.0"
 CombatLogger.logFile = nil
-CombatLogger.logFileName = "combat_log_" .. os.date("%Y%m%d_%H%M%S") .. ".csv"
+CombatLogger.logFileName = "combat_log_" .. tostring(timer.getAbsTime()) .. ".csv"
 CombatLogger.stats = {}
 CombatLogger.activeUnits = {}
+CombatLogger.startTime = timer.getAbsTime()
 
 -- Configuration
 CombatLogger.config = {
@@ -29,7 +30,7 @@ function CombatLogger:init()
         self.logFile = io.open(self.config.logPath .. self.logFileName, "w")
         if self.logFile then
             -- Write CSV header
-            self.logFile:write("Timestamp,Event,Killer,KillerType,KillerCoalition,KillerCountry,Victim,VictimType,VictimCoalition,VictimCountry,Weapon,Details\n")
+            self.logFile:write("MissionTime,Event,Killer,KillerType,KillerCoalition,KillerCountry,Victim,VictimType,VictimCoalition,VictimCountry,Weapon,Details\n")
             self.logFile:flush()
         end
     end
@@ -358,7 +359,7 @@ function CombatLogger:logEvent(eventType, killer, killerType, killerCoalition, k
                               victim, victimType, victimCoalition, victimCountry, weapon, details)
     if not self.config.logToFile or not self.logFile then return end
     
-    local timestamp = os.date("%Y-%m-%d %H:%M:%S")
+    local timestamp = tostring(timer.getAbsTime() - self.startTime)
     local line = string.format("%s,%s,%s,%s,%d,%d,%s,%s,%d,%d,%s,%s\n",
                               timestamp, eventType, killer or "", killerType or "", 
                               killerCoalition or -1, killerCountry or -1,
@@ -373,7 +374,7 @@ end
 -- Log general message
 function CombatLogger:log(message)
     if self.config.logToFile and self.logFile then
-        self.logFile:write(os.date("%Y-%m-%d %H:%M:%S") .. ",INFO,,,,,,,,,,," .. message .. "\n")
+        self.logFile:write(tostring(timer.getAbsTime() - self.startTime) .. ",INFO,,,,,,,,,,," .. message .. "\n")
         self.logFile:flush()
     end
 end
@@ -443,7 +444,7 @@ end
 
 -- Export statistics to JSON file
 function CombatLogger:exportStats()
-    local jsonFile = io.open(self.config.logPath .. "combat_stats_" .. os.date("%Y%m%d_%H%M%S") .. ".json", "w")
+    local jsonFile = io.open(self.config.logPath .. "combat_stats_" .. tostring(timer.getAbsTime()) .. ".json", "w")
     if jsonFile then
         -- Simple JSON serialization
         jsonFile:write("{\n")

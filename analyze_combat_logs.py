@@ -79,6 +79,13 @@ class CombatLogAnalyzer:
         """Process a single event from CSV"""
         event_type = event.get('Event', '')
         
+        # Handle both old (Timestamp) and new (MissionTime) formats
+        mission_time = event.get('MissionTime') or event.get('Timestamp', '0')
+        try:
+            self.mission_time = float(mission_time)
+        except:
+            pass
+        
         if event_type == 'KILL':
             killer = event.get('Killer', 'Unknown')
             victim = event.get('Victim', 'Unknown')
