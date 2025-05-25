@@ -13,9 +13,9 @@ Key improvements in v3.0:
 
 Installation:
 1. Place this file in your mission's trigger "DO SCRIPT FILE" action
-2. Logs will be saved to DCS.log in the default DCS logging folder:
-   %USERPROFILE%\Saved Games\DCS\Logs\DCS.log
-3. All entries have "COMBAT_LOG:" prefix for easy filtering
+2. Logs will be saved to a separate file in the DCS logging folder:
+   %USERPROFILE%\Saved Games\DCS\Logs\combat_log_HHMMSS.log
+3. If separate file creation fails, falls back to DCS.log with "COMBAT_LOG:" prefix
 4. Mission summary will be logged at mission end
 
 Author: AI Assistant
@@ -79,6 +79,7 @@ local CombatLogger = {
     logBuffer = {},
     bufferSize = 0,
     maxBufferSize = 100,
+    logFileName = nil, -- Will be set on first write
     
     -- Player tracking (polling-based)
     knownPlayers = {},
@@ -110,6 +111,48 @@ local CombatLogger = {
 -- LOGGING FUNCTIONS
 -- ============================================================================
 
+local function getLogFileName()
+    -- Generate unique log file name with mission timestamp
+    local timestamp = safeNumber(timer.getAbsTime())
+    local hours = math.floor(timestamp / 3600) % 24
+    local minutes = math.floor(timestamp / 60) % 60
+    local seconds = math.floor(timestamp) % 60
+    
+    return string.format("combat_log_%02d%02d%02d.log", hours, minutes, seconds)
+end
+
+local function writeToSeparateLogFile(content)
+    local success, error = pcall(function()
+        -- Try to write to separate combat log file in DCS Logs folder
+        local logFileName = CombatLogger.logFileName or getLogFileName()
+        CombatLogger.logFileName = logFileName -- Store for consistency
+        
+        -- Use DCS export functions to write to separate file
+        local exportPath = lfs and lfs.writedir() or ""
+        if exportPath and exportPath ~= "" then
+            local fullPath = exportPath .. "Logs\\" .. logFileName
+            
+            -- Try to write to separate file
+            local file = io.open(fullPath, "a")
+            if file then
+                file:write(content .. "\n")
+                file:close()
+                return true
+            end
+        end
+        
+        -- Fallback: write to DCS.log with clear prefix
+        env.info("COMBAT_LOG: " .. content, false)
+        return false
+    end)
+    
+    if not success then
+        -- Final fallback to DCS.log
+        env.info("COMBAT_LOG: " .. safeString(content), false)
+        env.info("COMBAT_LOG: Log write error: " .. safeString(error), false)
+    end
+end
+
 local function addToBuffer(message)
     if not message then return end
     
@@ -129,9 +172,7 @@ function flushLogBuffer()
         for i = 1, CombatLogger.bufferSize do
             local message = CombatLogger.logBuffer[i]
             if message then
-                -- Write to DCS.log in the default logging folder
-                -- DCS.log is automatically saved to %USERPROFILE%\Saved Games\DCS\Logs\
-                env.info("COMBAT_LOG: " .. message, false)
+                writeToSeparateLogFile(message)
             end
         end
     end)
@@ -640,6 +681,10 @@ local function initializeCombatLogger()
         
         logEvent("SYSTEM", "Combat Logger v" .. CombatLogger.version .. " initialized (Multiplayer Compatible)")
         logEvent("SYSTEM", "Using polling-based player detection for MP compatibility")
+        
+        -- Log the target file name
+        local logFileName = getLogFileName()
+        logEvent("SYSTEM", "Target log file: " .. logFileName)
         
         -- Register event handler for reliable events only
         world.addEventHandler(CombatEventHandler)
