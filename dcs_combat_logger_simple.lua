@@ -13,7 +13,7 @@ INSTALLATION:
    - Action: Do Script (paste this entire script)
 3. Save and run your mission
 
-Log files are saved to: %USERPROFILE%\Saved Games\DCS\Logs\
+Log files are saved to: %TEMP% (Windows temp directory)
 
 Version: 2.0 (Simplified & Enhanced)
 --]]
@@ -65,13 +65,9 @@ end
 
 -- Initialize logger
 local function initLogger()
-    -- Create log directory if needed
-    local logDir = lfs.writedir() .. "Logs\\"
-    lfs.mkdir(logDir)
-    
-    -- Create log file
+    -- Create log file in DCS temp directory (always writable)
     local timestamp = os.date("%Y%m%d_%H%M%S")
-    local filename = logDir .. CONFIG.LOG_PREFIX .. timestamp .. ".log"
+    local filename = os.getenv("TEMP") .. "\\" .. CONFIG.LOG_PREFIX .. timestamp .. ".log"
     
     CombatLogger.logFile = io.open(filename, "w")
     if not CombatLogger.logFile then
