@@ -1,9 +1,10 @@
 --[[
-DCS World Air-to-Air Combat Event Logger (Simplified & Enhanced)
-===============================================================
+DCS World Air-to-Air Combat Event Logger (Simplified & Enhanced - FIXED)
+========================================================================
 
 A comprehensive combat event logger for DCS World missions that tracks
 all relevant air-to-air combat events without external dependencies.
+This version is fully compatible with DCS scripting restrictions.
 
 INSTALLATION:
 1. Open your mission in DCS Mission Editor
@@ -15,7 +16,7 @@ INSTALLATION:
 
 Log data is output to: DCS.log file (all entries prefixed with "COMBAT_LOG:")
 
-Version: 2.0 (Simplified & Enhanced)
+Version: 2.1 (Fully Fixed)
 --]]
 
 -- Configuration
@@ -44,6 +45,48 @@ local function safeString(value)
     return tostring(value)
 end
 
+-- Utility: Safe number conversion
+local function safeNumber(value)
+    if value == nil then return 0 end
+    local num = tonumber(value)
+    return num or 0
+end
+
+-- Utility: Count table entries (replacement for table.getn)
+local function countTable(tbl)
+    if not tbl then return 0 end
+    local count = 0
+    for _ in pairs(tbl) do
+        count = count + 1
+    end
+    return count
+end
+
+-- Utility: Safe math operations (replacement for math library)
+local function safeMath(operation, a, b)
+    local numA = safeNumber(a)
+    local numB = safeNumber(b)
+    
+    if operation == "divide" then
+        if numB == 0 then return 0 end
+        return numA / numB
+    elseif operation == "multiply" then
+        return numA * numB
+    elseif operation == "add" then
+        return numA + numB
+    elseif operation == "subtract" then
+        return numA - numB
+    elseif operation == "floor" then
+        -- Safe floor operation without math library
+        if numA >= 0 then
+            return numA - (numA % 1)
+        else
+            return numA - (numA % 1) - 1
+        end
+    end
+    return 0
+end
+
 -- Utility: Get timestamp
 local function getTimestamp()
     return timer.getTime() - CombatLogger.startTime
@@ -52,7 +95,7 @@ end
 -- Utility: Write to log
 local function log(level, message)
     local timestamp = getTimestamp()
-    local entry = string.format("[%08.2f] [%-5s] %s", timestamp, level, message)
+    local entry = string.format("[%08.2f] [%-5s] %s", timestamp, level, safeString(message))
     
     -- Store in buffer for later output
     table.insert(CombatLogger.logBuffer, entry)
@@ -66,18 +109,18 @@ local function initLogger()
     -- Initialize using DCS's built-in functions only
     CombatLogger.startTime = timer.getTime()
     
-    -- Store mission data
+    -- Store mission data safely
     CombatLogger.missionData = {
-        theatre = env.mission.theatre,
+        theatre = safeString(env.mission and env.mission.theatre),
         startTime = string.format("%.0f", CombatLogger.startTime),
         weather = "Clear", -- Could be expanded
     }
     
     -- Write header to log buffer
     table.insert(CombatLogger.logBuffer, "=== DCS COMBAT EVENT LOG ===")
-    table.insert(CombatLogger.logBuffer, "Version: 2.0 (Simplified & Enhanced)")
-    table.insert(CombatLogger.logBuffer, "Mission: " .. safeString(env.mission.theatre))
-    table.insert(CombatLogger.logBuffer, "Start Time: " .. string.format("%.0f", CombatLogger.startTime))
+    table.insert(CombatLogger.logBuffer, "Version: 2.1 (Fully Fixed)")
+    table.insert(CombatLogger.logBuffer, "Mission: " .. CombatLogger.missionData.theatre)
+    table.insert(CombatLogger.logBuffer, "Start Time: " .. CombatLogger.missionData.startTime)
     table.insert(CombatLogger.logBuffer, "========================================")
     table.insert(CombatLogger.logBuffer, "")
     
@@ -85,104 +128,166 @@ local function initLogger()
     CombatLogger.initialized = true
     
     -- Show user message
-    trigger.action.outText("Combat Event Logger activated - check DCS.log for events", 10)
+    trigger.action.outText("Combat Event Logger v2.1 activated - check DCS.log for events", 10)
     
     return true
 end
 
--- Get comprehensive unit information
+-- Get comprehensive unit information with full error protection
 local function getUnitData(unit)
     if not unit then return nil end
     
-    -- Safely get unit data
+    -- Safely get unit data with multiple layers of protection
     local ok, data = pcall(function()
         local unitData = {
-            name = unit:getName(),
-            type = unit:getTypeName(),
-            coalition = unit:getCoalition(),
-            country = unit:getCountry(),
+            name = "Unknown",
+            type = "Unknown",
+            coalition = 0,
+            country = 0,
+            pilot = "Unknown",
+            group = "Unknown",
+            groupSize = 1,
+            position = {x = 0, y = 0, z = 0},
+            coalitionName = "Unknown",
+            category = 0,
+            isAircraft = false,
+            isHelicopter = false
         }
         
+        -- Get basic unit info with safe method calls
+        if unit.getName then
+            unitData.name = safeString(unit:getName())
+        end
+        
+        if unit.getTypeName then
+            unitData.type = safeString(unit:getTypeName())
+        end
+        
+        if unit.getCoalition then
+            unitData.coalition = safeNumber(unit:getCoalition())
+        end
+        
+        if unit.getCountry then
+            unitData.country = safeNumber(unit:getCountry())
+        end
+        
         -- Get pilot name if available
-        local unitName = unit:getName()
-        if unitName then
-            unitData.pilot = unit:getPlayerName() or unitName
+        if unit.getPlayerName then
+            local playerName = unit:getPlayerName()
+            if playerName then
+                unitData.pilot = safeString(playerName)
+            else
+                unitData.pilot = unitData.name
+            end
+        else
+            unitData.pilot = unitData.name
         end
         
-        -- Get group info
-        local group = unit:getGroup()
-        if group then
-            unitData.group = group:getName()
-            unitData.groupSize = group:getSize()
+        -- Get group info safely
+        if unit.getGroup then
+            local group = unit:getGroup()
+            if group then
+                if group.getName then
+                    unitData.group = safeString(group:getName())
+                end
+                if group.getSize then
+                    unitData.groupSize = safeNumber(group:getSize())
+                end
+            end
         end
         
-        -- Get position
-        local pos = unit:getPoint()
-        if pos then
-            unitData.position = {
-                x = math.floor(pos.x),
-                y = math.floor(pos.y),
-                z = math.floor(pos.z)
-            }
+        -- Get position safely
+        if unit.getPoint then
+            local pos = unit:getPoint()
+            if pos then
+                unitData.position = {
+                    x = safeMath("floor", pos.x),
+                    y = safeMath("floor", pos.y),
+                    z = safeMath("floor", pos.z)
+                }
+            end
         end
         
-        -- Coalition name
-        unitData.coalitionName = unitData.coalition == 0 and "Neutral" or
-                                 unitData.coalition == 1 and "Red" or
-                                 unitData.coalition == 2 and "Blue" or "Unknown"
+        -- Coalition name mapping
+        if unitData.coalition == 0 then
+            unitData.coalitionName = "Neutral"
+        elseif unitData.coalition == 1 then
+            unitData.coalitionName = "Red"
+        elseif unitData.coalition == 2 then
+            unitData.coalitionName = "Blue"
+        else
+            unitData.coalitionName = "Unknown"
+        end
         
-        -- Check if it's an aircraft
-        local desc = unit:getDesc()
-        if desc then
-            unitData.category = desc.category
-            unitData.isAircraft = desc.category == 0 or desc.category == 1
-            unitData.isHelicopter = desc.category == 1
+        -- Check if it's an aircraft safely
+        if unit.getDesc then
+            local desc = unit:getDesc()
+            if desc and desc.category then
+                unitData.category = safeNumber(desc.category)
+                unitData.isAircraft = (unitData.category == 0 or unitData.category == 1)
+                unitData.isHelicopter = (unitData.category == 1)
+            end
         end
         
         return unitData
     end)
     
     if not ok then
-        log("ERROR", "Failed to get unit data: " .. tostring(data))
+        log("ERROR", "Failed to get unit data: " .. safeString(data))
         return nil
     end
     
     return data
 end
 
--- Get weapon information
+-- Get weapon information with full error protection
 local function getWeaponData(weapon)
-    if not weapon then return nil end
+    if not weapon then return {type = "Unknown", category = 0} end
     
     local ok, data = pcall(function()
         local weaponData = {
-            type = weapon:getTypeName(),
-            category = weapon:getCategory()
+            type = "Unknown",
+            category = 0,
+            launcher = "Unknown",
+            targetName = "Unknown"
         }
         
-        -- Try to get launcher info
-        local launcher = weapon:getLauncher()
-        if launcher then
-            weaponData.launcher = launcher:getName()
+        if weapon.getTypeName then
+            weaponData.type = safeString(weapon:getTypeName())
         end
         
-        -- Try to get target
-        local target = weapon:getTarget()
-        if target then
-            weaponData.targetName = target:getName()
+        if weapon.getCategory then
+            weaponData.category = safeNumber(weapon:getCategory())
+        end
+        
+        -- Try to get launcher info safely
+        if weapon.getLauncher then
+            local launcher = weapon:getLauncher()
+            if launcher and launcher.getName then
+                weaponData.launcher = safeString(launcher:getName())
+            end
+        end
+        
+        -- Try to get target safely
+        if weapon.getTarget then
+            local target = weapon:getTarget()
+            if target and target.getName then
+                weaponData.targetName = safeString(target:getName())
+            end
         end
         
         return weaponData
     end)
     
-    return ok and data or {type = "Unknown"}
+    return ok and data or {type = "Unknown", category = 0}
 end
 
--- Update pilot statistics
+-- Update pilot statistics with safe operations
 local function updatePilotStats(unitData, eventType, additionalData)
     if not unitData or not unitData.name then return end
     
     local pilotId = unitData.pilot or unitData.name
+    additionalData = additionalData or {}
     
     -- Initialize pilot entry
     if not CombatLogger.pilots[pilotId] then
@@ -218,17 +323,18 @@ local function updatePilotStats(unitData, eventType, additionalData)
     -- Update stats based on event
     if eventType == "shot" and additionalData.weapon then
         pilot.shots = pilot.shots + 1
-        local weaponType = additionalData.weapon.type
+        local weaponType = safeString(additionalData.weapon.type)
         pilot.weaponsFired[weaponType] = (pilot.weaponsFired[weaponType] or 0) + 1
         
-        if additionalData.weapon.targetName then
+        if additionalData.weapon.targetName and additionalData.weapon.targetName ~= "Unknown" then
             pilot.targetsEngaged[additionalData.weapon.targetName] = true
         end
     elseif eventType == "hit" then
         pilot.hits = pilot.hits + 1
     elseif eventType == "kill" and additionalData.victim then
         pilot.kills = pilot.kills + 1
-        pilot.targetsKilled[additionalData.victim] = (pilot.targetsKilled[additionalData.victim] or 0) + 1
+        local victimName = safeString(additionalData.victim)
+        pilot.targetsKilled[victimName] = (pilot.targetsKilled[victimName] or 0) + 1
     elseif eventType == "death" then
         pilot.deaths = pilot.deaths + 1
         pilot.flightTime = pilot.flightTime + (getTimestamp() - pilot.firstSeen)
@@ -281,7 +387,7 @@ local function addFormationMember(groupName, pilotName)
     end
 end
 
--- Log event
+-- Log event with safe string formatting
 local function logEvent(eventType, data)
     local event = {
         id = #CombatLogger.events + 1,
@@ -292,45 +398,45 @@ local function logEvent(eventType, data)
     
     table.insert(CombatLogger.events, event)
     
-    -- Create log message
-    local message = eventType .. ": "
+    -- Create log message with safe string operations
+    local message = safeString(eventType) .. ": "
     
-    if eventType == "SHOT" then
+    if eventType == "SHOT" and data.shooter and data.weapon then
         message = message .. string.format("%s (%s) fired %s",
-            data.shooter.name, data.shooter.type, data.weapon.type)
-        if data.weapon.targetName then
-            message = message .. " at " .. data.weapon.targetName
+            safeString(data.shooter.name), safeString(data.shooter.type), safeString(data.weapon.type))
+        if data.weapon.targetName and data.weapon.targetName ~= "Unknown" then
+            message = message .. " at " .. safeString(data.weapon.targetName)
         end
-    elseif eventType == "HIT" then
+    elseif eventType == "HIT" and data.shooter and data.target and data.weapon then
         message = message .. string.format("%s hit %s with %s",
-            data.shooter.name, data.target.name, data.weapon.type)
-    elseif eventType == "KILL" then
+            safeString(data.shooter.name), safeString(data.target.name), safeString(data.weapon.type))
+    elseif eventType == "KILL" and data.killer and data.victim and data.weapon then
         message = message .. string.format("%s killed %s with %s",
-            data.killer.name, data.victim.name, data.weapon.type)
-    elseif eventType == "DEATH" then
+            safeString(data.killer.name), safeString(data.victim.name), safeString(data.weapon.type))
+    elseif eventType == "DEATH" and data.unit then
         message = message .. string.format("%s (%s) was destroyed",
-            data.unit.name, data.unit.type)
-    elseif eventType == "CRASH" then
+            safeString(data.unit.name), safeString(data.unit.type))
+    elseif eventType == "CRASH" and data.unit then
         message = message .. string.format("%s (%s) crashed",
-            data.unit.name, data.unit.type)
-    elseif eventType == "EJECT" then
+            safeString(data.unit.name), safeString(data.unit.type))
+    elseif eventType == "EJECT" and data.unit then
         message = message .. string.format("Pilot ejected from %s (%s)",
-            data.unit.name, data.unit.type)
-    elseif eventType == "BIRTH" then
+            safeString(data.unit.name), safeString(data.unit.type))
+    elseif eventType == "BIRTH" and data.unit then
         message = message .. string.format("%s (%s) spawned",
-            data.unit.name, data.unit.type)
-    elseif eventType == "TAKEOFF" then
+            safeString(data.unit.name), safeString(data.unit.type))
+    elseif eventType == "TAKEOFF" and data.unit then
         message = message .. string.format("%s (%s) took off from %s",
-            data.unit.name, data.unit.type, data.airbase or "ground")
-    elseif eventType == "LAND" then
+            safeString(data.unit.name), safeString(data.unit.type), safeString(data.airbase or "ground"))
+    elseif eventType == "LAND" and data.unit then
         message = message .. string.format("%s (%s) landed at %s",
-            data.unit.name, data.unit.type, data.airbase or "ground")
-    elseif eventType == "ENGINE_START" then
+            safeString(data.unit.name), safeString(data.unit.type), safeString(data.airbase or "ground"))
+    elseif eventType == "ENGINE_START" and data.unit then
         message = message .. string.format("%s started engines",
-            data.unit.name)
-    elseif eventType == "ENGINE_STOP" then
+            safeString(data.unit.name))
+    elseif eventType == "ENGINE_STOP" and data.unit then
         message = message .. string.format("%s stopped engines",
-            data.unit.name)
+            safeString(data.unit.name))
     else
         message = message .. "Unknown event"
     end
@@ -338,235 +444,262 @@ local function logEvent(eventType, data)
     log("EVENT", message)
 end
 
--- Event handlers
+-- Event handlers with comprehensive error protection
 local function handleEvent(event)
     if not CombatLogger.initialized or not event then return end
     
-    -- Get event data safely
+    -- Safely get event data
     local eventId = event.id
     local initiator = event.initiator
     local target = event.target
     local weapon = event.weapon
     local place = event.place
     
-    -- Birth event (unit spawned)
-    if eventId == world.event.S_EVENT_BIRTH then
-        local unitData = getUnitData(initiator)
-        if unitData and unitData.isAircraft then
-            logEvent("BIRTH", {unit = unitData})
-            updatePilotStats(unitData, "birth")
-            addFormationMember(unitData.group, unitData.pilot or unitData.name)
-        end
-        
-    -- Shot event
-    elseif eventId == world.event.S_EVENT_SHOT then
-        local shooterData = getUnitData(initiator)
-        local weaponData = getWeaponData(weapon)
-        
-        if shooterData and weaponData then
-            logEvent("SHOT", {
-                shooter = shooterData,
-                weapon = weaponData
-            })
-            updatePilotStats(shooterData, "shot", {weapon = weaponData})
-            updateFormationStats(shooterData.group, "shot")
-            
-            -- Track weapon
-            local weaponId = weapon:getName()
-            if weaponId then
-                CombatLogger.weapons[weaponId] = {
-                    type = weaponData.type,
-                    launcher = shooterData.name,
-                    launchTime = getTimestamp()
-                }
+    -- Wrap all event handling in pcall for safety
+    local ok, err = pcall(function()
+        -- Birth event (unit spawned)
+        if eventId == world.event.S_EVENT_BIRTH then
+            local unitData = getUnitData(initiator)
+            if unitData and unitData.isAircraft then
+                logEvent("BIRTH", {unit = unitData})
+                updatePilotStats(unitData, "birth")
+                addFormationMember(unitData.group, unitData.pilot or unitData.name)
             end
+            
+        -- Shot event
+        elseif eventId == world.event.S_EVENT_SHOT then
+            local shooterData = getUnitData(initiator)
+            local weaponData = getWeaponData(weapon)
+            
+            if shooterData and weaponData then
+                logEvent("SHOT", {
+                    shooter = shooterData,
+                    weapon = weaponData
+                })
+                updatePilotStats(shooterData, "shot", {weapon = weaponData})
+                updateFormationStats(shooterData.group, "shot")
+                
+                -- Track weapon safely
+                if weapon and weapon.getName then
+                    local weaponId = weapon:getName()
+                    if weaponId then
+                        CombatLogger.weapons[weaponId] = {
+                            type = weaponData.type,
+                            launcher = shooterData.name,
+                            launchTime = getTimestamp()
+                        }
+                    end
+                end
+            end
+            
+        -- Hit event
+        elseif eventId == world.event.S_EVENT_HIT then
+            local shooterData = getUnitData(initiator)
+            local targetData = getUnitData(target)
+            local weaponData = getWeaponData(weapon)
+            
+            if shooterData and targetData and weaponData then
+                logEvent("HIT", {
+                    shooter = shooterData,
+                    target = targetData,
+                    weapon = weaponData
+                })
+                updatePilotStats(shooterData, "hit")
+                updateFormationStats(shooterData.group, "hit")
+            end
+            
+        -- Kill event (unit destroyed by another unit)
+        elseif eventId == world.event.S_EVENT_KILL then
+            local killerData = getUnitData(initiator)
+            local victimData = getUnitData(target)
+            local weaponData = getWeaponData(weapon)
+            
+            if killerData and victimData then
+                logEvent("KILL", {
+                    killer = killerData,
+                    victim = victimData,
+                    weapon = weaponData or {type = "Unknown"}
+                })
+                updatePilotStats(killerData, "kill", {victim = victimData.name})
+                updatePilotStats(victimData, "death")
+                updateFormationStats(killerData.group, "kill")
+                updateFormationStats(victimData.group, "loss")
+            end
+            
+        -- Dead event (unit destroyed)
+        elseif eventId == world.event.S_EVENT_DEAD then
+            local unitData = getUnitData(initiator)
+            if unitData then
+                logEvent("DEATH", {unit = unitData})
+                updatePilotStats(unitData, "death")
+                updateFormationStats(unitData.group, "loss")
+            end
+            
+        -- Crash event
+        elseif eventId == world.event.S_EVENT_CRASH then
+            local unitData = getUnitData(initiator)
+            if unitData and unitData.isAircraft then
+                logEvent("CRASH", {unit = unitData})
+                updatePilotStats(unitData, "crash")
+            end
+            
+        -- Ejection event
+        elseif eventId == world.event.S_EVENT_EJECTION then
+            local unitData = getUnitData(initiator)
+            if unitData then
+                logEvent("EJECT", {unit = unitData})
+                updatePilotStats(unitData, "ejection")
+            end
+            
+        -- Takeoff event
+        elseif eventId == world.event.S_EVENT_TAKEOFF then
+            local unitData = getUnitData(initiator)
+            if unitData and unitData.isAircraft then
+                local airbaseName = nil
+                if place and place.getName then
+                    airbaseName = place:getName()
+                end
+                logEvent("TAKEOFF", {
+                    unit = unitData,
+                    airbase = airbaseName
+                })
+                updatePilotStats(unitData, "takeoff")
+            end
+            
+        -- Landing event
+        elseif eventId == world.event.S_EVENT_LAND then
+            local unitData = getUnitData(initiator)
+            if unitData and unitData.isAircraft then
+                local airbaseName = nil
+                if place and place.getName then
+                    airbaseName = place:getName()
+                end
+                logEvent("LAND", {
+                    unit = unitData,
+                    airbase = airbaseName
+                })
+                updatePilotStats(unitData, "landing")
+            end
+            
+        -- Engine startup event
+        elseif eventId == world.event.S_EVENT_ENGINE_STARTUP then
+            local unitData = getUnitData(initiator)
+            if unitData and unitData.isAircraft then
+                logEvent("ENGINE_START", {unit = unitData})
+            end
+            
+        -- Engine shutdown event
+        elseif eventId == world.event.S_EVENT_ENGINE_SHUTDOWN then
+            local unitData = getUnitData(initiator)
+            if unitData and unitData.isAircraft then
+                logEvent("ENGINE_STOP", {unit = unitData})
+            end
+            
+        -- Refueling events
+        elseif eventId == world.event.S_EVENT_REFUELING then
+            local unitData = getUnitData(initiator)
+            if unitData then
+                log("EVENT", string.format("REFUEL: %s started refueling", unitData.name))
+            end
+            
+        elseif eventId == world.event.S_EVENT_REFUELING_STOP then
+            local unitData = getUnitData(initiator)
+            if unitData then
+                log("EVENT", string.format("REFUEL: %s stopped refueling", unitData.name))
+            end
+            
+        -- Mission events
+        elseif eventId == world.event.S_EVENT_MISSION_START then
+            log("INFO", "Mission started")
+            
+        elseif eventId == world.event.S_EVENT_MISSION_END then
+            log("INFO", "Mission ending...")
+            finalizeLogs()
         end
-        
-    -- Hit event
-    elseif eventId == world.event.S_EVENT_HIT then
-        local shooterData = getUnitData(initiator)
-        local targetData = getUnitData(target)
-        local weaponData = getWeaponData(weapon)
-        
-        if shooterData and targetData and weaponData then
-            logEvent("HIT", {
-                shooter = shooterData,
-                target = targetData,
-                weapon = weaponData
-            })
-            updatePilotStats(shooterData, "hit")
-            updateFormationStats(shooterData.group, "hit")
-        end
-        
-    -- Kill event (unit destroyed by another unit)
-    elseif eventId == world.event.S_EVENT_KILL then
-        local killerData = getUnitData(initiator)
-        local victimData = getUnitData(target)
-        local weaponData = getWeaponData(weapon)
-        
-        if killerData and victimData then
-            logEvent("KILL", {
-                killer = killerData,
-                victim = victimData,
-                weapon = weaponData or {type = "Unknown"}
-            })
-            updatePilotStats(killerData, "kill", {victim = victimData.name})
-            updatePilotStats(victimData, "death")
-            updateFormationStats(killerData.group, "kill")
-            updateFormationStats(victimData.group, "loss")
-        end
-        
-    -- Dead event (unit destroyed)
-    elseif eventId == world.event.S_EVENT_DEAD then
-        local unitData = getUnitData(initiator)
-        if unitData then
-            logEvent("DEATH", {unit = unitData})
-            updatePilotStats(unitData, "death")
-            updateFormationStats(unitData.group, "loss")
-        end
-        
-    -- Crash event
-    elseif eventId == world.event.S_EVENT_CRASH then
-        local unitData = getUnitData(initiator)
-        if unitData and unitData.isAircraft then
-            logEvent("CRASH", {unit = unitData})
-            updatePilotStats(unitData, "crash")
-        end
-        
-    -- Ejection event
-    elseif eventId == world.event.S_EVENT_EJECTION then
-        local unitData = getUnitData(initiator)
-        if unitData then
-            logEvent("EJECT", {unit = unitData})
-            updatePilotStats(unitData, "ejection")
-        end
-        
-    -- Takeoff event
-    elseif eventId == world.event.S_EVENT_TAKEOFF then
-        local unitData = getUnitData(initiator)
-        if unitData and unitData.isAircraft then
-            local airbaseName = place and place:getName() or nil
-            logEvent("TAKEOFF", {
-                unit = unitData,
-                airbase = airbaseName
-            })
-            updatePilotStats(unitData, "takeoff")
-        end
-        
-    -- Landing event
-    elseif eventId == world.event.S_EVENT_LAND then
-        local unitData = getUnitData(initiator)
-        if unitData and unitData.isAircraft then
-            local airbaseName = place and place:getName() or nil
-            logEvent("LAND", {
-                unit = unitData,
-                airbase = airbaseName
-            })
-            updatePilotStats(unitData, "landing")
-        end
-        
-    -- Engine startup event
-    elseif eventId == world.event.S_EVENT_ENGINE_STARTUP then
-        local unitData = getUnitData(initiator)
-        if unitData and unitData.isAircraft then
-            logEvent("ENGINE_START", {unit = unitData})
-        end
-        
-    -- Engine shutdown event
-    elseif eventId == world.event.S_EVENT_ENGINE_SHUTDOWN then
-        local unitData = getUnitData(initiator)
-        if unitData and unitData.isAircraft then
-            logEvent("ENGINE_STOP", {unit = unitData})
-        end
-        
-    -- Refueling events
-    elseif eventId == world.event.S_EVENT_REFUELING then
-        local unitData = getUnitData(initiator)
-        if unitData then
-            log("EVENT", string.format("REFUEL: %s started refueling", unitData.name))
-        end
-        
-    elseif eventId == world.event.S_EVENT_REFUELING_STOP then
-        local unitData = getUnitData(initiator)
-        if unitData then
-            log("EVENT", string.format("REFUEL: %s stopped refueling", unitData.name))
-        end
-        
-    -- Mission events
-    elseif eventId == world.event.S_EVENT_MISSION_START then
-        log("INFO", "Mission started")
-        
-    elseif eventId == world.event.S_EVENT_MISSION_END then
-        log("INFO", "Mission ending...")
-        finalizeLogs()
+    end)
+    
+    if not ok then
+        log("ERROR", "Event handling error: " .. safeString(err))
     end
 end
 
--- Status report
+-- Status report with safe operations
 local function reportStatus()
     if not CombatLogger.initialized then return end
     
-    local missionTime = getTimestamp() / 60
-    local pilotCount = 0
-    local formationCount = 0
+    local missionTime = safeMath("divide", getTimestamp(), 60)
+    local pilotCount = countTable(CombatLogger.pilots)
+    local formationCount = countTable(CombatLogger.formations)
     local totalKills = 0
     local totalShots = 0
     
     for _, pilot in pairs(CombatLogger.pilots) do
-        pilotCount = pilotCount + 1
-        totalKills = totalKills + pilot.kills
-        totalShots = totalShots + pilot.shots
-    end
-    
-    for _ in pairs(CombatLogger.formations) do
-        formationCount = formationCount + 1
+        totalKills = totalKills + safeNumber(pilot.kills)
+        totalShots = totalShots + safeNumber(pilot.shots)
     end
     
     log("INFO", string.format("STATUS: Time=%.1fm Events=%d Pilots=%d Formations=%d Kills=%d Shots=%d",
         missionTime, #CombatLogger.events, pilotCount, formationCount, totalKills, totalShots))
     
-    -- Schedule next report
-    timer.scheduleFunction(reportStatus, nil, timer.getTime() + CONFIG.LOG_INTERVAL)
+    -- Schedule next report with error protection
+    local ok, err = pcall(function()
+        timer.scheduleFunction(reportStatus, nil, timer.getTime() + CONFIG.LOG_INTERVAL)
+    end)
+    
+    if not ok then
+        log("ERROR", "Failed to schedule status report: " .. safeString(err))
+    end
 end
 
--- Finalize logs
+-- Finalize logs with safe operations
 function finalizeLogs()
     log("INFO", "Finalizing combat log...")
+    
+    -- Count pilots and formations safely
+    local pilotCount = countTable(CombatLogger.pilots)
+    local formationCount = countTable(CombatLogger.formations)
     
     -- Mission summary
     table.insert(CombatLogger.logBuffer, "")
     table.insert(CombatLogger.logBuffer, "========================================")
     table.insert(CombatLogger.logBuffer, "=== MISSION SUMMARY ===")
     table.insert(CombatLogger.logBuffer, "Total Events: " .. #CombatLogger.events)
-    table.insert(CombatLogger.logBuffer, "Mission Duration: " .. string.format("%.1f minutes", getTimestamp() / 60))
-    table.insert(CombatLogger.logBuffer, "Total Pilots: " .. table.getn(CombatLogger.pilots))
-    table.insert(CombatLogger.logBuffer, "Total Formations: " .. table.getn(CombatLogger.formations))
+    table.insert(CombatLogger.logBuffer, "Mission Duration: " .. string.format("%.1f minutes", safeMath("divide", getTimestamp(), 60)))
+    table.insert(CombatLogger.logBuffer, "Total Pilots: " .. pilotCount)
+    table.insert(CombatLogger.logBuffer, "Total Formations: " .. formationCount)
     
     -- Pilot statistics
     table.insert(CombatLogger.logBuffer, "")
     table.insert(CombatLogger.logBuffer, "=== PILOT STATISTICS ===")
     for pilotId, pilot in pairs(CombatLogger.pilots) do
-        local efficiency = pilot.shots > 0 and (pilot.hits / pilot.shots * 100) or 0
-        local kd = pilot.deaths > 0 and (pilot.kills / pilot.deaths) or pilot.kills
+        local shots = safeNumber(pilot.shots)
+        local hits = safeNumber(pilot.hits)
+        local kills = safeNumber(pilot.kills)
+        local deaths = safeNumber(pilot.deaths)
+        
+        local efficiency = safeMath("multiply", safeMath("divide", hits, shots), 100)
+        local kd = deaths > 0 and safeMath("divide", kills, deaths) or kills
         
         table.insert(CombatLogger.logBuffer, string.format(
             "%-20s (%s, %s, %s)",
-            pilot.name, pilot.aircraft, pilot.group, pilot.coalition
+            safeString(pilot.name), safeString(pilot.aircraft), safeString(pilot.group), safeString(pilot.coalition)
         ))
         table.insert(CombatLogger.logBuffer, string.format(
             "  Combat: Kills=%d Deaths=%d KD=%.2f Shots=%d Hits=%d Eff=%.1f%%",
-            pilot.kills, pilot.deaths, kd, pilot.shots, pilot.hits, efficiency
+            kills, deaths, kd, shots, hits, efficiency
         ))
         table.insert(CombatLogger.logBuffer, string.format(
             "  Flight: Takeoffs=%d Landings=%d Ejections=%d Crashes=%d Time=%.1fm",
-            pilot.takeoffs, pilot.landings, pilot.ejections, pilot.crashes, pilot.flightTime / 60
+            safeNumber(pilot.takeoffs), safeNumber(pilot.landings), 
+            safeNumber(pilot.ejections), safeNumber(pilot.crashes), 
+            safeMath("divide", safeNumber(pilot.flightTime), 60)
         ))
         
         -- Weapon usage
         if next(pilot.weaponsFired) then
             local weaponStr = "  Weapons: "
             for weapon, count in pairs(pilot.weaponsFired) do
-                weaponStr = weaponStr .. weapon .. "=" .. count .. " "
+                weaponStr = weaponStr .. safeString(weapon) .. "=" .. safeNumber(count) .. " "
             end
             table.insert(CombatLogger.logBuffer, weaponStr)
         end
@@ -576,12 +709,12 @@ function finalizeLogs()
     table.insert(CombatLogger.logBuffer, "")
     table.insert(CombatLogger.logBuffer, "=== FORMATION STATISTICS ===")
     for formName, form in pairs(CombatLogger.formations) do
-        local memberCount = 0
-        for _ in pairs(form.members) do memberCount = memberCount + 1 end
+        local memberCount = countTable(form.members)
         
         table.insert(CombatLogger.logBuffer, string.format(
             "%-20s: Members=%d Shots=%d Hits=%d Kills=%d Losses=%d",
-            form.name, memberCount, form.shots, form.hits, form.kills, form.losses
+            safeString(form.name), memberCount, safeNumber(form.shots), 
+            safeNumber(form.hits), safeNumber(form.kills), safeNumber(form.losses)
         ))
     end
     
@@ -592,14 +725,18 @@ function finalizeLogs()
     local blueKills, blueLosses, blueShots = 0, 0, 0
     
     for _, pilot in pairs(CombatLogger.pilots) do
+        local kills = safeNumber(pilot.kills)
+        local deaths = safeNumber(pilot.deaths)
+        local shots = safeNumber(pilot.shots)
+        
         if pilot.coalition == "Red" then
-            redKills = redKills + pilot.kills
-            redLosses = redLosses + pilot.deaths
-            redShots = redShots + pilot.shots
+            redKills = redKills + kills
+            redLosses = redLosses + deaths
+            redShots = redShots + shots
         elseif pilot.coalition == "Blue" then
-            blueKills = blueKills + pilot.kills
-            blueLosses = blueLosses + pilot.deaths
-            blueShots = blueShots + pilot.shots
+            blueKills = blueKills + kills
+            blueLosses = blueLosses + deaths
+            blueShots = blueShots + shots
         end
     end
     
@@ -612,33 +749,50 @@ function finalizeLogs()
     
     -- Output entire log buffer to DCS log
     for _, line in ipairs(CombatLogger.logBuffer) do
-        env.info("COMBAT_LOG: " .. line)
+        env.info("COMBAT_LOG: " .. safeString(line))
     end
     
     env.info("Combat log finalized - check DCS.log for complete mission summary")
     trigger.action.outText("Combat log complete - check DCS.log for full mission summary", 15)
 end
 
--- Initialize
+-- Initialize with error protection
 local function initialize()
-    if not initLogger() then
+    local ok, err = pcall(function()
+        if not initLogger() then
+            return false
+        end
+        
+        -- Create event handler
+        local eventHandler = {}
+        eventHandler.onEvent = handleEvent
+        world.addEventHandler(eventHandler)
+        
+        -- Schedule status reports
+        timer.scheduleFunction(reportStatus, nil, timer.getTime() + CONFIG.LOG_INTERVAL)
+        
+        return true
+    end)
+    
+    if not ok then
+        env.error("Failed to initialize DCS Combat Logger: " .. safeString(err))
         return false
     end
-    
-    -- Create event handler
-    local eventHandler = {}
-    eventHandler.onEvent = handleEvent
-    world.addEventHandler(eventHandler)
-    
-    -- Schedule status reports
-    timer.scheduleFunction(reportStatus, nil, timer.getTime() + CONFIG.LOG_INTERVAL)
     
     return true
 end
 
--- Start the logger
-if initialize() then
-    env.info("DCS Combat Logger v2.0 initialized successfully")
-else
-    env.error("Failed to initialize DCS Combat Logger")
+-- Start the logger with final error protection
+local initOk, initErr = pcall(function()
+    if initialize() then
+        env.info("DCS Combat Logger v2.1 (Fully Fixed) initialized successfully")
+        return true
+    else
+        env.error("Failed to initialize DCS Combat Logger")
+        return false
+    end
+end)
+
+if not initOk then
+    env.error("Critical error in DCS Combat Logger: " .. safeString(initErr))
 end 
