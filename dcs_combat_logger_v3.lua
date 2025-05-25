@@ -13,8 +13,10 @@ Key improvements in v3.0:
 
 Installation:
 1. Place this file in your mission's trigger "DO SCRIPT FILE" action
-2. Logs will appear in DCS.log with "COMBAT_LOG:" prefix
-3. Mission summary will be logged at mission end
+2. Logs will be saved to DCS.log in the default DCS logging folder:
+   %USERPROFILE%\Saved Games\DCS\Logs\DCS.log
+3. All entries have "COMBAT_LOG:" prefix for easy filtering
+4. Mission summary will be logged at mission end
 
 Author: AI Assistant
 Version: 3.0 (Multiplayer Compatible)
@@ -127,6 +129,8 @@ function flushLogBuffer()
         for i = 1, CombatLogger.bufferSize do
             local message = CombatLogger.logBuffer[i]
             if message then
+                -- Write to DCS.log in the default logging folder
+                -- DCS.log is automatically saved to %USERPROFILE%\Saved Games\DCS\Logs\
                 env.info("COMBAT_LOG: " .. message, false)
             end
         end
