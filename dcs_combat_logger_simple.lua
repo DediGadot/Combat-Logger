@@ -13,7 +13,7 @@ INSTALLATION:
    - Action: Do Script (paste this entire script)
 3. Save and run your mission
 
-Log files are saved to: Current working directory (usually mission folder)
+Log data is output to: DCS.log file (all entries prefixed with "COMBAT_LOG:")
 
 Version: 2.0 (Simplified & Enhanced)
 --]]
@@ -29,7 +29,7 @@ local CONFIG = {
 -- Global state
 local CombatLogger = {
     startTime = 0,
-    logFile = nil,
+    logBuffer = {},
     events = {},
     pilots = {},
     formations = {},
@@ -51,38 +51,20 @@ end
 
 -- Utility: Write to log
 local function log(level, message)
-    if not CombatLogger.logFile then return end
-    
     local timestamp = getTimestamp()
-    local entry = string.format("[%08.2f] [%-5s] %s\n", timestamp, level, message)
+    local entry = string.format("[%08.2f] [%-5s] %s", timestamp, level, message)
     
-    CombatLogger.logFile:write(entry)
+    -- Store in buffer for later output
+    table.insert(CombatLogger.logBuffer, entry)
     
-    if level == "ERROR" or (CONFIG.ENABLE_DEBUG and level == "DEBUG") then
-        env.info("COMBAT_LOG: " .. entry)
-    end
+    -- Always output to DCS log for real-time monitoring
+    env.info("COMBAT_LOG: " .. entry)
 end
 
 -- Initialize logger
 local function initLogger()
-    -- Create log file using DCS's built-in functions
-    local timestamp = string.format("%.0f", timer.getTime())
-    local filename = CONFIG.LOG_PREFIX .. timestamp .. ".log"
-    
-    CombatLogger.logFile = io.open(filename, "w")
-    if not CombatLogger.logFile then
-        env.error("Failed to create log file: " .. filename)
-        return false
-    end
-    
-    -- Write header
+    -- Initialize using DCS's built-in functions only
     CombatLogger.startTime = timer.getTime()
-    CombatLogger.logFile:write("=== DCS COMBAT EVENT LOG ===\n")
-    CombatLogger.logFile:write("Version: 2.0 (Simplified & Enhanced)\n")
-    CombatLogger.logFile:write("Mission: " .. safeString(env.mission.theatre) .. "\n")
-    CombatLogger.logFile:write("Start Time: " .. string.format("%.0f", CombatLogger.startTime) .. "\n")
-    CombatLogger.logFile:write("Log File: " .. filename .. "\n")
-    CombatLogger.logFile:write("========================================\n\n")
     
     -- Store mission data
     CombatLogger.missionData = {
@@ -91,11 +73,19 @@ local function initLogger()
         weather = "Clear", -- Could be expanded
     }
     
+    -- Write header to log buffer
+    table.insert(CombatLogger.logBuffer, "=== DCS COMBAT EVENT LOG ===")
+    table.insert(CombatLogger.logBuffer, "Version: 2.0 (Simplified & Enhanced)")
+    table.insert(CombatLogger.logBuffer, "Mission: " .. safeString(env.mission.theatre))
+    table.insert(CombatLogger.logBuffer, "Start Time: " .. string.format("%.0f", CombatLogger.startTime))
+    table.insert(CombatLogger.logBuffer, "========================================")
+    table.insert(CombatLogger.logBuffer, "")
+    
     log("INFO", "Combat logger initialized successfully")
     CombatLogger.initialized = true
     
     -- Show user message
-    trigger.action.outText("Combat Event Logger activated - logging to: " .. filename, 10)
+    trigger.action.outText("Combat Event Logger activated - check DCS.log for events", 10)
     
     return true
 end
@@ -541,57 +531,63 @@ end
 
 -- Finalize logs
 function finalizeLogs()
-    if not CombatLogger.logFile then return end
-    
     log("INFO", "Finalizing combat log...")
     
     -- Mission summary
-    CombatLogger.logFile:write("\n========================================\n")
-    CombatLogger.logFile:write("=== MISSION SUMMARY ===\n")
-    CombatLogger.logFile:write("Total Events: " .. #CombatLogger.events .. "\n")
-    CombatLogger.logFile:write("Mission Duration: " .. string.format("%.1f minutes\n", getTimestamp() / 60))
-    CombatLogger.logFile:write("Total Pilots: " .. table.getn(CombatLogger.pilots) .. "\n")
-    CombatLogger.logFile:write("Total Formations: " .. table.getn(CombatLogger.formations) .. "\n")
+    table.insert(CombatLogger.logBuffer, "")
+    table.insert(CombatLogger.logBuffer, "========================================")
+    table.insert(CombatLogger.logBuffer, "=== MISSION SUMMARY ===")
+    table.insert(CombatLogger.logBuffer, "Total Events: " .. #CombatLogger.events)
+    table.insert(CombatLogger.logBuffer, "Mission Duration: " .. string.format("%.1f minutes", getTimestamp() / 60))
+    table.insert(CombatLogger.logBuffer, "Total Pilots: " .. table.getn(CombatLogger.pilots))
+    table.insert(CombatLogger.logBuffer, "Total Formations: " .. table.getn(CombatLogger.formations))
     
     -- Pilot statistics
-    CombatLogger.logFile:write("\n=== PILOT STATISTICS ===\n")
+    table.insert(CombatLogger.logBuffer, "")
+    table.insert(CombatLogger.logBuffer, "=== PILOT STATISTICS ===")
     for pilotId, pilot in pairs(CombatLogger.pilots) do
         local efficiency = pilot.shots > 0 and (pilot.hits / pilot.shots * 100) or 0
         local kd = pilot.deaths > 0 and (pilot.kills / pilot.deaths) or pilot.kills
         
-        CombatLogger.logFile:write(string.format(
-            "%-20s (%s, %s, %s)\n" ..
-            "  Combat: Kills=%d Deaths=%d KD=%.2f Shots=%d Hits=%d Eff=%.1f%%\n" ..
-            "  Flight: Takeoffs=%d Landings=%d Ejections=%d Crashes=%d Time=%.1fm\n",
-            pilot.name, pilot.aircraft, pilot.group, pilot.coalition,
-            pilot.kills, pilot.deaths, kd, pilot.shots, pilot.hits, efficiency,
+        table.insert(CombatLogger.logBuffer, string.format(
+            "%-20s (%s, %s, %s)",
+            pilot.name, pilot.aircraft, pilot.group, pilot.coalition
+        ))
+        table.insert(CombatLogger.logBuffer, string.format(
+            "  Combat: Kills=%d Deaths=%d KD=%.2f Shots=%d Hits=%d Eff=%.1f%%",
+            pilot.kills, pilot.deaths, kd, pilot.shots, pilot.hits, efficiency
+        ))
+        table.insert(CombatLogger.logBuffer, string.format(
+            "  Flight: Takeoffs=%d Landings=%d Ejections=%d Crashes=%d Time=%.1fm",
             pilot.takeoffs, pilot.landings, pilot.ejections, pilot.crashes, pilot.flightTime / 60
         ))
         
         -- Weapon usage
         if next(pilot.weaponsFired) then
-            CombatLogger.logFile:write("  Weapons: ")
+            local weaponStr = "  Weapons: "
             for weapon, count in pairs(pilot.weaponsFired) do
-                CombatLogger.logFile:write(weapon .. "=" .. count .. " ")
+                weaponStr = weaponStr .. weapon .. "=" .. count .. " "
             end
-            CombatLogger.logFile:write("\n")
+            table.insert(CombatLogger.logBuffer, weaponStr)
         end
     end
     
     -- Formation statistics
-    CombatLogger.logFile:write("\n=== FORMATION STATISTICS ===\n")
+    table.insert(CombatLogger.logBuffer, "")
+    table.insert(CombatLogger.logBuffer, "=== FORMATION STATISTICS ===")
     for formName, form in pairs(CombatLogger.formations) do
         local memberCount = 0
         for _ in pairs(form.members) do memberCount = memberCount + 1 end
         
-        CombatLogger.logFile:write(string.format(
-            "%-20s: Members=%d Shots=%d Hits=%d Kills=%d Losses=%d\n",
+        table.insert(CombatLogger.logBuffer, string.format(
+            "%-20s: Members=%d Shots=%d Hits=%d Kills=%d Losses=%d",
             form.name, memberCount, form.shots, form.hits, form.kills, form.losses
         ))
     end
     
     -- Combat effectiveness summary
-    CombatLogger.logFile:write("\n=== COMBAT EFFECTIVENESS ===\n")
+    table.insert(CombatLogger.logBuffer, "")
+    table.insert(CombatLogger.logBuffer, "=== COMBAT EFFECTIVENESS ===")
     local redKills, redLosses, redShots = 0, 0, 0
     local blueKills, blueLosses, blueShots = 0, 0, 0
     
@@ -607,31 +603,20 @@ function finalizeLogs()
         end
     end
     
-    CombatLogger.logFile:write(string.format("Red Coalition:  Kills=%d Losses=%d Shots=%d\n", redKills, redLosses, redShots))
-    CombatLogger.logFile:write(string.format("Blue Coalition: Kills=%d Losses=%d Shots=%d\n", blueKills, blueLosses, blueShots))
+    table.insert(CombatLogger.logBuffer, string.format("Red Coalition:  Kills=%d Losses=%d Shots=%d", redKills, redLosses, redShots))
+    table.insert(CombatLogger.logBuffer, string.format("Blue Coalition: Kills=%d Losses=%d Shots=%d", blueKills, blueLosses, blueShots))
     
-    -- JSON export for analysis
-    CombatLogger.logFile:write("\n=== JSON EXPORT ===\n")
-    CombatLogger.logFile:write("{\n")
-    CombatLogger.logFile:write('  "mission": {\n')
-    CombatLogger.logFile:write('    "theatre": "' .. safeString(CombatLogger.missionData.theatre) .. '",\n')
-    CombatLogger.logFile:write('    "duration_seconds": ' .. getTimestamp() .. ',\n')
-    CombatLogger.logFile:write('    "total_events": ' .. #CombatLogger.events .. '\n')
-    CombatLogger.logFile:write('  },\n')
-    CombatLogger.logFile:write('  "statistics": {\n')
-    CombatLogger.logFile:write('    "total_pilots": ' .. table.getn(CombatLogger.pilots) .. ',\n')
-    CombatLogger.logFile:write('    "total_formations": ' .. table.getn(CombatLogger.formations) .. ',\n')
-    CombatLogger.logFile:write('    "red_kills": ' .. redKills .. ',\n')
-    CombatLogger.logFile:write('    "red_losses": ' .. redLosses .. ',\n')
-    CombatLogger.logFile:write('    "blue_kills": ' .. blueKills .. ',\n')
-    CombatLogger.logFile:write('    "blue_losses": ' .. blueLosses .. '\n')
-    CombatLogger.logFile:write('  }\n')
-    CombatLogger.logFile:write('}\n')
+    -- Output complete log to DCS log
+    table.insert(CombatLogger.logBuffer, "")
+    table.insert(CombatLogger.logBuffer, "=== END OF LOG ===")
     
-    CombatLogger.logFile:write("\n=== END OF LOG ===\n")
-    CombatLogger.logFile:close()
+    -- Output entire log buffer to DCS log
+    for _, line in ipairs(CombatLogger.logBuffer) do
+        env.info("COMBAT_LOG: " .. line)
+    end
     
-    env.info("Combat log finalized and saved")
+    env.info("Combat log finalized - check DCS.log for complete mission summary")
+    trigger.action.outText("Combat log complete - check DCS.log for full mission summary", 15)
 end
 
 -- Initialize
