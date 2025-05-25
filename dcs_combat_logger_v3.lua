@@ -300,16 +300,21 @@ function handlePlayerEnter(unitInfo)
     local playerName = safeString(unitInfo.playerName)
     local unitName = safeString(unitInfo.unitName)
     local typeName = safeString(unitInfo.typeName)
-    local coalitionName = CombatLogger.stats.coalitions[unitInfo.coalition].name
+    local coalition = safeNumber(unitInfo.coalition)
+    local coalitionName = "Unknown"
+    
+    if CombatLogger.stats.coalitions[coalition] then
+        coalitionName = CombatLogger.stats.coalitions[coalition].name
+    end
     
     logEvent("PLAYER_ENTER", string.format("%s entered %s (%s) - %s Coalition", 
-        playerName, unitName, typeName, coalitionName))
+        safeString(playerName), safeString(unitName), safeString(typeName), safeString(coalitionName)))
     
     -- Initialize pilot stats if needed
     if not CombatLogger.stats.pilots[playerName] then
         CombatLogger.stats.pilots[playerName] = {
             name = playerName,
-            coalition = unitInfo.coalition,
+            coalition = coalition,
             aircraft = {},
             shots = 0,
             hits = 0,
@@ -344,28 +349,36 @@ end
 local function getEventUnitInfo(unit)
     if not unit then return "Unknown", "Unknown", 0 end
     
-    local success, info = pcall(function()
+    local success, playerName, unitName, coalition = pcall(function()
         local playerName = "AI"
         if unit.getPlayerName then
             local pName = unit:getPlayerName()
-            if pName then playerName = pName end
+            if pName and pName ~= "" then 
+                playerName = pName 
+            end
         end
         
         local unitName = "Unknown"
         if unit.getName then
-            unitName = unit:getName()
+            local uName = unit:getName()
+            if uName and uName ~= "" then
+                unitName = uName
+            end
         end
         
         local coalition = 0
         if unit.getCoalition then
-            coalition = unit:getCoalition()
+            local coal = unit:getCoalition()
+            if coal then
+                coalition = coal
+            end
         end
         
         return playerName, unitName, coalition
     end)
     
-    if success then
-        return info
+    if success and playerName and unitName and coalition then
+        return safeString(playerName), safeString(unitName), safeNumber(coalition)
     else
         return "Unknown", "Unknown", 0
     end
@@ -377,16 +390,22 @@ local function handleShot(event)
         local weaponName = "Unknown"
         
         if event.weapon and event.weapon.getTypeName then
-            weaponName = event.weapon:getTypeName()
+            local wName = event.weapon:getTypeName()
+            if wName and wName ~= "" then
+                weaponName = wName
+            end
         end
         
         logEvent("SHOT", string.format("%s (%s) fired %s", 
-            shooterName, shooterUnit, weaponName))
+            safeString(shooterName), safeString(shooterUnit), safeString(weaponName)))
         
         -- Update statistics
         CombatLogger.stats.events.shots = CombatLogger.stats.events.shots + 1
-        CombatLogger.stats.coalitions[shooterCoalition].shots = 
-            CombatLogger.stats.coalitions[shooterCoalition].shots + 1
+        
+        if CombatLogger.stats.coalitions[shooterCoalition] then
+            CombatLogger.stats.coalitions[shooterCoalition].shots = 
+                CombatLogger.stats.coalitions[shooterCoalition].shots + 1
+        end
         
         if CombatLogger.stats.pilots[shooterName] then
             CombatLogger.stats.pilots[shooterName].shots = 
@@ -413,16 +432,23 @@ local function handleHit(event)
         local weaponName = "Unknown"
         
         if event.weapon and event.weapon.getTypeName then
-            weaponName = event.weapon:getTypeName()
+            local wName = event.weapon:getTypeName()
+            if wName and wName ~= "" then
+                weaponName = wName
+            end
         end
         
         logEvent("HIT", string.format("%s (%s) hit %s (%s) with %s", 
-            shooterName, shooterUnit, targetName, targetUnit, weaponName))
+            safeString(shooterName), safeString(shooterUnit), 
+            safeString(targetName), safeString(targetUnit), safeString(weaponName)))
         
         -- Update statistics
         CombatLogger.stats.events.hits = CombatLogger.stats.events.hits + 1
-        CombatLogger.stats.coalitions[shooterCoalition].hits = 
-            CombatLogger.stats.coalitions[shooterCoalition].hits + 1
+        
+        if CombatLogger.stats.coalitions[shooterCoalition] then
+            CombatLogger.stats.coalitions[shooterCoalition].hits = 
+                CombatLogger.stats.coalitions[shooterCoalition].hits + 1
+        end
         
         if CombatLogger.stats.pilots[shooterName] then
             CombatLogger.stats.pilots[shooterName].hits = 
@@ -448,20 +474,29 @@ local function handleKill(event)
         local weaponName = "Unknown"
         
         if event.weapon and event.weapon.getTypeName then
-            weaponName = event.weapon:getTypeName()
+            local wName = event.weapon:getTypeName()
+            if wName and wName ~= "" then
+                weaponName = wName
+            end
         end
         
         logEvent("KILL", string.format("%s (%s) killed %s (%s) with %s", 
-            killerName, killerUnit, victimName, victimUnit, weaponName))
+            safeString(killerName), safeString(killerUnit), 
+            safeString(victimName), safeString(victimUnit), safeString(weaponName)))
         
         -- Update statistics
         CombatLogger.stats.events.kills = CombatLogger.stats.events.kills + 1
         CombatLogger.stats.events.deaths = CombatLogger.stats.events.deaths + 1
         
-        CombatLogger.stats.coalitions[killerCoalition].kills = 
-            CombatLogger.stats.coalitions[killerCoalition].kills + 1
-        CombatLogger.stats.coalitions[victimCoalition].deaths = 
-            CombatLogger.stats.coalitions[victimCoalition].deaths + 1
+        if CombatLogger.stats.coalitions[killerCoalition] then
+            CombatLogger.stats.coalitions[killerCoalition].kills = 
+                CombatLogger.stats.coalitions[killerCoalition].kills + 1
+        end
+        
+        if CombatLogger.stats.coalitions[victimCoalition] then
+            CombatLogger.stats.coalitions[victimCoalition].deaths = 
+                CombatLogger.stats.coalitions[victimCoalition].deaths + 1
+        end
         
         if CombatLogger.stats.pilots[killerName] then
             CombatLogger.stats.pilots[killerName].kills = 
@@ -483,7 +518,8 @@ local function handleTakeoff(event)
     local success, error = pcall(function()
         local pilotName, unitName, coalition = getEventUnitInfo(event.initiator)
         
-        logEvent("TAKEOFF", string.format("%s (%s) took off", pilotName, unitName))
+        logEvent("TAKEOFF", string.format("%s (%s) took off", 
+            safeString(pilotName), safeString(unitName)))
         
         CombatLogger.stats.events.takeoffs = CombatLogger.stats.events.takeoffs + 1
         
@@ -503,7 +539,8 @@ local function handleLanding(event)
     local success, error = pcall(function()
         local pilotName, unitName, coalition = getEventUnitInfo(event.initiator)
         
-        logEvent("LANDING", string.format("%s (%s) landed", pilotName, unitName))
+        logEvent("LANDING", string.format("%s (%s) landed", 
+            safeString(pilotName), safeString(unitName)))
         
         CombatLogger.stats.events.landings = CombatLogger.stats.events.landings + 1
         
@@ -529,7 +566,8 @@ local function handleCrash(event)
     local success, error = pcall(function()
         local pilotName, unitName, coalition = getEventUnitInfo(event.initiator)
         
-        logEvent("CRASH", string.format("%s (%s) crashed", pilotName, unitName))
+        logEvent("CRASH", string.format("%s (%s) crashed", 
+            safeString(pilotName), safeString(unitName)))
         
         CombatLogger.stats.events.crashes = CombatLogger.stats.events.crashes + 1
     end)
@@ -543,7 +581,8 @@ local function handleEjection(event)
     local success, error = pcall(function()
         local pilotName, unitName, coalition = getEventUnitInfo(event.initiator)
         
-        logEvent("EJECTION", string.format("%s ejected from %s", pilotName, unitName))
+        logEvent("EJECTION", string.format("%s ejected from %s", 
+            safeString(pilotName), safeString(unitName)))
         
         CombatLogger.stats.events.ejections = CombatLogger.stats.events.ejections + 1
     end)
