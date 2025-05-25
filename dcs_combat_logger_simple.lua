@@ -13,7 +13,7 @@ INSTALLATION:
    - Action: Do Script (paste this entire script)
 3. Save and run your mission
 
-Log files are saved to: %TEMP% (Windows temp directory)
+Log files are saved to: Current working directory (usually mission folder)
 
 Version: 2.0 (Simplified & Enhanced)
 --]]
@@ -65,9 +65,9 @@ end
 
 -- Initialize logger
 local function initLogger()
-    -- Create log file in DCS temp directory (always writable)
-    local timestamp = os.date("%Y%m%d_%H%M%S")
-    local filename = os.getenv("TEMP") .. "\\" .. CONFIG.LOG_PREFIX .. timestamp .. ".log"
+    -- Create log file using DCS's built-in functions
+    local timestamp = string.format("%.0f", timer.getTime())
+    local filename = CONFIG.LOG_PREFIX .. timestamp .. ".log"
     
     CombatLogger.logFile = io.open(filename, "w")
     if not CombatLogger.logFile then
@@ -80,14 +80,14 @@ local function initLogger()
     CombatLogger.logFile:write("=== DCS COMBAT EVENT LOG ===\n")
     CombatLogger.logFile:write("Version: 2.0 (Simplified & Enhanced)\n")
     CombatLogger.logFile:write("Mission: " .. safeString(env.mission.theatre) .. "\n")
-    CombatLogger.logFile:write("Date: " .. os.date() .. "\n")
+    CombatLogger.logFile:write("Start Time: " .. string.format("%.0f", CombatLogger.startTime) .. "\n")
     CombatLogger.logFile:write("Log File: " .. filename .. "\n")
     CombatLogger.logFile:write("========================================\n\n")
     
     -- Store mission data
     CombatLogger.missionData = {
         theatre = env.mission.theatre,
-        startTime = os.date(),
+        startTime = string.format("%.0f", CombatLogger.startTime),
         weather = "Clear", -- Could be expanded
     }
     
