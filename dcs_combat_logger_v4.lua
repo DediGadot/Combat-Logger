@@ -1,15 +1,16 @@
 --[[
-DCS Combat Logger v4.0 - Simplified
-====================================
+DCS Combat Logger v4.1 - Simplified with getLauncher
+====================================================
 
 A streamlined combat logging system for DCS World.
 Focuses on core functionality with minimal complexity.
 
 Features:
 - Logs combat events (shots, hits, kills)
+- Uses weapon.getLauncher() for improved accuracy on hits/kills
 - Tracks player activity
 - Simple file output to DCS.log
-- Minimal debug output
+- Minimal debug output with data source tracking
 - Multiplayer compatible
 
 Installation:
@@ -18,7 +19,7 @@ Installation:
 3. Set DEBUG = false to disable debug messages
 
 Author: AI Assistant
-Version: 4.0 (Simplified)
+Version: 4.1 (Simplified with getLauncher)
 Date: 2024
 --]]
 
@@ -86,7 +87,7 @@ local function getUnitInfo(unit)
         
         local unitName = "Unknown"
         if unit.getName then
-            unitName = unit:getName() or "Unknown"
+            unitName = unit:getCallsign() or "Unknown"
         end
         
         local coalition = 0
@@ -117,12 +118,51 @@ local function getWeaponName(weapon)
     return success and name or "Unknown"
 end
 
+-- Get launcher info from weapon (more accurate than event.initiator for hits/kills)
+local function getLauncherInfo(weapon)
+    if not weapon then return nil end
+    
+    local success, launcher = pcall(function()
+        if weapon.getLauncher then
+            return weapon:getLauncher()
+        end
+        return nil
+    end)
+    
+    return success and launcher or nil
+end
+
+-- Get best available shooter info (tries weapon launcher first, falls back to event initiator)
+local function getBestShooterInfo(event)
+    local shooterUnit = nil
+    local source = "event"
+    
+    -- Try to get launcher from weapon first (more accurate for hits/kills)
+    if event.weapon then
+        local launcher = getLauncherInfo(event.weapon)
+        if launcher then
+            shooterUnit = launcher
+            source = "weapon"
+        end
+    end
+    
+    -- Fall back to event initiator if no launcher found
+    if not shooterUnit and event.initiator then
+        shooterUnit = event.initiator
+        source = "event"
+    end
+    
+    local shooterName, unitName, coalition = getUnitInfo(shooterUnit)
+    return shooterName, unitName, coalition, source
+end
+
 -- ============================================================================
 -- EVENT HANDLERS
 -- ============================================================================
 
 local function handleShot(event)
     local success = pcall(function()
+        -- For shots, event.initiator is usually most accurate
         local shooterName, shooterUnit, coalition = getUnitInfo(event.initiator)
         local weaponName = getWeaponName(event.weapon)
         
@@ -149,11 +189,12 @@ end
 
 local function handleHit(event)
     local success = pcall(function()
-        local shooterName, shooterUnit, shooterCoalition = getUnitInfo(event.initiator)
+        -- Use getLauncher for more accurate shooter info on hits
+        local shooterName, shooterUnit, shooterCoalition, source = getBestShooterInfo(event)
         local targetName, targetUnit, targetCoalition = getUnitInfo(event.target)
         local weaponName = getWeaponName(event.weapon)
         
-        log(string.format("HIT: %s hit %s with %s", shooterName, targetName, weaponName))
+        log(string.format("HIT: %s (%s) hit %s with %s", shooterName, shooterUnit, targetName, weaponName))
         
         -- Update stats
         Logger.stats.hits = Logger.stats.hits + 1
@@ -163,9 +204,9 @@ local function handleHit(event)
             Logger.stats.blue.hits = Logger.stats.blue.hits + 1
         end
         
-        -- Debug for player involvement
+        -- Debug for player involvement (show data source for troubleshooting)
         if (shooterName ~= "AI" or targetName ~= "AI") and DEBUG then
-            debug("HIT: " .. shooterName .. " → " .. targetName)
+            debug(string.format("HIT: %s → %s (%s)", shooterName, targetName, source))
         end
     end)
     
@@ -176,11 +217,12 @@ end
 
 local function handleKill(event)
     local success = pcall(function()
-        local killerName, killerUnit, killerCoalition = getUnitInfo(event.initiator)
+        -- Use getLauncher for more accurate shooter info on kills
+        local killerName, killerUnit, killerCoalition, source = getBestShooterInfo(event)
         local victimName, victimUnit, victimCoalition = getUnitInfo(event.target)
         local weaponName = getWeaponName(event.weapon)
         
-        log(string.format("KILL: %s killed %s with %s", killerName, victimName, weaponName))
+        log(string.format("KILL: %s (%s) killed %s with %s", killerName, killerUnit, victimName, weaponName))
         
         -- Update stats
         Logger.stats.kills = Logger.stats.kills + 1
@@ -190,9 +232,9 @@ local function handleKill(event)
             Logger.stats.blue.kills = Logger.stats.blue.kills + 1
         end
         
-        -- Debug for player involvement
+        -- Debug for player involvement (show data source for troubleshooting)
         if (killerName ~= "AI" or victimName ~= "AI") and DEBUG then
-            debug("KILL: " .. killerName .. " eliminated " .. victimName)
+            debug(string.format("KILL: %s eliminated %s (%s)", killerName, victimName, source))
         end
     end)
     
@@ -326,9 +368,9 @@ local function initialize()
     local success = pcall(function()
         Logger.startTime = timer.getTime()
         
-        log("Combat Logger v4.0 initialized")
+        log("Combat Logger v4.1 initialized")
         if DEBUG then
-            debug("Combat Logger v4.0 started - Debug mode ON")
+            debug("Combat Logger v4.1 started - Debug mode ON")
         end
         
         -- Register event handlers
