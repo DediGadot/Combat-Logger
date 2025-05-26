@@ -72,6 +72,33 @@ end
 local math = safeMath()
 
 -- ============================================================================
+-- DEBUG FUNCTION (Defined early to avoid nil reference errors)
+-- ============================================================================
+
+local function debugMessage(message, duration)
+    -- Check if CombatLogger exists and debug mode is enabled
+    if not CombatLogger or not CombatLogger.debugMode then return end
+    
+    local success, error = pcall(function()
+        local timestamp = 0
+        if CombatLogger.startTime then
+            timestamp = safeNumber(timer.getTime()) - CombatLogger.startTime
+        end
+        local debugMsg = string.format("[%.1f] DEBUG: %s", timestamp, safeString(message))
+        
+        -- Send message to all players
+        trigger.action.outText(debugMsg, duration or 10)
+        
+        -- Also log to DCS.log directly (avoid recursion)
+        env.info("COMBAT_LOG: DEBUG: " .. safeString(message), false)
+    end)
+    
+    if not success then
+        env.info("COMBAT_LOG: Debug message error: " .. safeString(error), false)
+    end
+end
+
+-- ============================================================================
 -- GLOBAL DATA STRUCTURES
 -- ============================================================================
 
@@ -230,25 +257,6 @@ local function logEvent(eventType, details)
     local timestamp = safeNumber(timer.getTime()) - CombatLogger.startTime
     local message = string.format("[%.1f] %s: %s", timestamp, safeString(eventType), safeString(details))
     addToBuffer(message)
-end
-
-local function debugMessage(message, duration)
-    if not CombatLogger.debugMode then return end
-    
-    local success, error = pcall(function()
-        local timestamp = safeNumber(timer.getTime()) - CombatLogger.startTime
-        local debugMsg = string.format("[%.1f] DEBUG: %s", timestamp, safeString(message))
-        
-        -- Send message to all players
-        trigger.action.outText(debugMsg, duration or 10)
-        
-        -- Also log to file
-        addToBuffer("DEBUG: " .. safeString(message))
-    end)
-    
-    if not success then
-        env.info("COMBAT_LOG: Debug message error: " .. safeString(error), false)
-    end
 end
 
 -- ============================================================================
