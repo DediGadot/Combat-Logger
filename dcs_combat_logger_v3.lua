@@ -10,6 +10,7 @@ Key improvements in v3.0:
 - Focuses on events that work reliably in multiplayer
 - Enhanced error protection for dedicated server environments
 - Simplified player tracking system
+- Built-in debug mode with in-game messages
 
 Installation:
 1. Place this file in your mission's trigger "DO SCRIPT FILE" action
@@ -17,6 +18,7 @@ Installation:
    %USERPROFILE%\Saved Games\DCS\Logs\combat_log_HHMMSS.log
 3. If separate file creation fails, falls back to DCS.log with "COMBAT_LOG:" prefix
 4. Mission summary will be logged at mission end
+5. Debug messages appear in-game (set debugMode = false to disable)
 
 Author: AI Assistant
 Version: 3.0 (Multiplayer Compatible)
@@ -80,6 +82,7 @@ local CombatLogger = {
     bufferSize = 0,
     maxBufferSize = 100,
     logFileName = nil, -- Will be set on first write
+    debugMode = true, -- Set to false to disable debug messages
     
     -- Player tracking (polling-based)
     knownPlayers = {},
@@ -125,7 +128,32 @@ local function writeToSeparateLogFile(content)
     local success, error = pcall(function()
         -- Try to write to separate combat log file in DCS Logs folder
         local logFileName = CombatLogger.logFileName or getLogFileName()
-        CombatLogger.logFileName = logFileName -- Store for consistency
+        
+        -- First time setup - show debug info about log file
+        if not CombatLogger.logFileName then
+            CombatLogger.logFileName = logFileName
+            
+            -- Use DCS export functions to write to separate file
+            local exportPath = lfs and lfs.writedir() or ""
+            if exportPath and exportPath ~= "" then
+                local fullPath = exportPath .. "Logs\\" .. logFileName
+                debugMessage("Attempting to create log file: " .. fullPath, 15)
+                
+                -- Try to create/test the file
+                local testFile = io.open(fullPath, "a")
+                if testFile then
+                    testFile:close()
+                    debugMessage("✅ Combat log file created successfully!", 10)
+                    debugMessage("📁 Log location: " .. fullPath, 15)
+                else
+                    debugMessage("❌ Failed to create separate log file", 10)
+                    debugMessage("📝 Falling back to DCS.log", 10)
+                end
+            else
+                debugMessage("❌ Could not access DCS write directory", 10)
+                debugMessage("📝 Falling back to DCS.log", 10)
+            end
+        end
         
         -- Use DCS export functions to write to separate file
         local exportPath = lfs and lfs.writedir() or ""
@@ -150,6 +178,10 @@ local function writeToSeparateLogFile(content)
         -- Final fallback to DCS.log
         env.info("COMBAT_LOG: " .. safeString(content), false)
         env.info("COMBAT_LOG: Log write error: " .. safeString(error), false)
+        
+        if CombatLogger.debugMode then
+            debugMessage("❌ Log write error: " .. safeString(error), 15)
+        end
     end
 end
 
@@ -168,6 +200,7 @@ end
 function flushLogBuffer()
     if CombatLogger.bufferSize == 0 then return end
     
+    local bufferCount = CombatLogger.bufferSize
     local success, error = pcall(function()
         for i = 1, CombatLogger.bufferSize do
             local message = CombatLogger.logBuffer[i]
@@ -179,6 +212,13 @@ function flushLogBuffer()
     
     if not success then
         env.info("COMBAT_LOG: Error flushing buffer: " .. safeString(error), false)
+        if CombatLogger.debugMode then
+            debugMessage("❌ Buffer flush error: " .. safeString(error), 10)
+        end
+    else
+        if CombatLogger.debugMode and bufferCount > 10 then
+            debugMessage("💾 Flushed " .. bufferCount .. " log entries", 5)
+        end
     end
     
     -- Clear buffer
@@ -192,6 +232,25 @@ local function logEvent(eventType, details)
     addToBuffer(message)
 end
 
+local function debugMessage(message, duration)
+    if not CombatLogger.debugMode then return end
+    
+    local success, error = pcall(function()
+        local timestamp = safeNumber(timer.getTime()) - CombatLogger.startTime
+        local debugMsg = string.format("[%.1f] DEBUG: %s", timestamp, safeString(message))
+        
+        -- Send message to all players
+        trigger.action.outText(debugMsg, duration or 10)
+        
+        -- Also log to file
+        addToBuffer("DEBUG: " .. safeString(message))
+    end)
+    
+    if not success then
+        env.info("COMBAT_LOG: Debug message error: " .. safeString(error), false)
+    end
+end
+
 -- ============================================================================
 -- PLAYER TRACKING (Polling-based for MP compatibility)
 -- ============================================================================
@@ -200,6 +259,11 @@ local function getUnitInfo(unit)
     if not unit then return nil end
     
     local success, info = pcall(function()
+        -- Check if unit object still exists and is valid
+        if not unit.isExist or not unit:isExist() then
+            return nil
+        end
+        
         local playerName = nil
         if unit.getPlayerName then
             playerName = unit:getPlayerName()
@@ -310,6 +374,8 @@ function handlePlayerEnter(unitInfo)
     logEvent("PLAYER_ENTER", string.format("%s entered %s (%s) - %s Coalition", 
         safeString(playerName), safeString(unitName), safeString(typeName), safeString(coalitionName)))
     
+    debugMessage("👤 Player joined: " .. playerName .. " in " .. typeName, 8)
+    
     -- Initialize pilot stats if needed
     if not CombatLogger.stats.pilots[playerName] then
         CombatLogger.stats.pilots[playerName] = {
@@ -340,6 +406,7 @@ function handlePlayerLeave(unitInfo)
     local unitName = safeString(unitInfo.unitName)
     
     logEvent("PLAYER_LEAVE", string.format("%s left %s", playerName, unitName))
+    debugMessage("👋 Player left: " .. playerName, 8)
 end
 
 -- ============================================================================
@@ -350,6 +417,14 @@ local function getEventUnitInfo(unit)
     if not unit then return "Unknown", "Unknown", 0 end
     
     local success, playerName, unitName, coalition = pcall(function()
+        -- Check if unit object still exists and is valid
+        if not unit.isExist or not unit:isExist() then
+            if CombatLogger.debugMode then
+                debugMessage("⚠️ Unit object no longer exists during event processing", 5)
+            end
+            return "Unknown", "Unknown", 0
+        end
+        
         local playerName = "AI"
         if unit.getPlayerName then
             local pName = unit:getPlayerName()
@@ -389,15 +464,25 @@ local function handleShot(event)
         local shooterName, shooterUnit, shooterCoalition = getEventUnitInfo(event.initiator)
         local weaponName = "Unknown"
         
-        if event.weapon and event.weapon.getTypeName then
-            local wName = event.weapon:getTypeName()
-            if wName and wName ~= "" then
+        if event.weapon then
+            local weaponSuccess, wName = pcall(function()
+                if event.weapon.getTypeName then
+                    return event.weapon:getTypeName()
+                end
+                return nil
+            end)
+            
+            if weaponSuccess and wName and wName ~= "" then
                 weaponName = wName
             end
         end
         
         logEvent("SHOT", string.format("%s (%s) fired %s", 
             safeString(shooterName), safeString(shooterUnit), safeString(weaponName)))
+        
+        if shooterName ~= "AI" then
+            debugMessage("🚀 " .. shooterName .. " fired " .. weaponName, 5)
+        end
         
         -- Update statistics
         CombatLogger.stats.events.shots = CombatLogger.stats.events.shots + 1
@@ -422,6 +507,9 @@ local function handleShot(event)
     
     if not success then
         logEvent("ERROR", "Shot handler failed: " .. safeString(error))
+        if CombatLogger.debugMode then
+            debugMessage("❌ Shot event error - check unit/weapon objects", 8)
+        end
     end
 end
 
@@ -431,9 +519,15 @@ local function handleHit(event)
         local targetName, targetUnit, targetCoalition = getEventUnitInfo(event.target)
         local weaponName = "Unknown"
         
-        if event.weapon and event.weapon.getTypeName then
-            local wName = event.weapon:getTypeName()
-            if wName and wName ~= "" then
+        if event.weapon then
+            local weaponSuccess, wName = pcall(function()
+                if event.weapon.getTypeName then
+                    return event.weapon:getTypeName()
+                end
+                return nil
+            end)
+            
+            if weaponSuccess and wName and wName ~= "" then
                 weaponName = wName
             end
         end
@@ -441,6 +535,10 @@ local function handleHit(event)
         logEvent("HIT", string.format("%s (%s) hit %s (%s) with %s", 
             safeString(shooterName), safeString(shooterUnit), 
             safeString(targetName), safeString(targetUnit), safeString(weaponName)))
+        
+        if shooterName ~= "AI" or targetName ~= "AI" then
+            debugMessage("💥 HIT: " .. shooterName .. " → " .. targetName, 6)
+        end
         
         -- Update statistics
         CombatLogger.stats.events.hits = CombatLogger.stats.events.hits + 1
@@ -464,6 +562,9 @@ local function handleHit(event)
     
     if not success then
         logEvent("ERROR", "Hit handler failed: " .. safeString(error))
+        if CombatLogger.debugMode then
+            debugMessage("❌ Hit event error - check unit/weapon objects", 8)
+        end
     end
 end
 
@@ -473,9 +574,15 @@ local function handleKill(event)
         local victimName, victimUnit, victimCoalition = getEventUnitInfo(event.target)
         local weaponName = "Unknown"
         
-        if event.weapon and event.weapon.getTypeName then
-            local wName = event.weapon:getTypeName()
-            if wName and wName ~= "" then
+        if event.weapon then
+            local weaponSuccess, wName = pcall(function()
+                if event.weapon.getTypeName then
+                    return event.weapon:getTypeName()
+                end
+                return nil
+            end)
+            
+            if weaponSuccess and wName and wName ~= "" then
                 weaponName = wName
             end
         end
@@ -483,6 +590,10 @@ local function handleKill(event)
         logEvent("KILL", string.format("%s (%s) killed %s (%s) with %s", 
             safeString(killerName), safeString(killerUnit), 
             safeString(victimName), safeString(victimUnit), safeString(weaponName)))
+        
+        if killerName ~= "AI" or victimName ~= "AI" then
+            debugMessage("💀 KILL: " .. killerName .. " eliminated " .. victimName, 8)
+        end
         
         -- Update statistics
         CombatLogger.stats.events.kills = CombatLogger.stats.events.kills + 1
@@ -511,6 +622,9 @@ local function handleKill(event)
     
     if not success then
         logEvent("ERROR", "Kill handler failed: " .. safeString(error))
+        if CombatLogger.debugMode then
+            debugMessage("❌ Kill event error - likely destroyed unit object", 8)
+        end
     end
 end
 
@@ -718,18 +832,25 @@ local function initializeCombatLogger()
     local success, error = pcall(function()
         CombatLogger.startTime = timer.getTime()
         
+        -- Show initialization debug messages
+        debugMessage("🚀 Combat Logger v" .. CombatLogger.version .. " starting up...", 10)
+        debugMessage("🔧 Debug mode: " .. (CombatLogger.debugMode and "ENABLED" or "DISABLED"), 8)
+        
         logEvent("SYSTEM", "Combat Logger v" .. CombatLogger.version .. " initialized (Multiplayer Compatible)")
         logEvent("SYSTEM", "Using polling-based player detection for MP compatibility")
         
         -- Log the target file name
         local logFileName = getLogFileName()
         logEvent("SYSTEM", "Target log file: " .. logFileName)
+        debugMessage("📝 Target log file: " .. logFileName, 12)
         
         -- Register event handler for reliable events only
         world.addEventHandler(CombatEventHandler)
+        debugMessage("✅ Event handlers registered", 8)
         
         -- Start player polling system
         timer.scheduleFunction(checkForPlayers, nil, timer.getTime() + CombatLogger.playerCheckInterval)
+        debugMessage("🔄 Player polling started (every " .. CombatLogger.playerCheckInterval .. "s)", 8)
         
         -- Schedule periodic buffer flushes
         timer.scheduleFunction(function()
@@ -737,11 +858,31 @@ local function initializeCombatLogger()
             return timer.getTime() + 30 -- Flush every 30 seconds
         end, nil, timer.getTime() + 30)
         
+        -- Schedule periodic status updates (if debug enabled)
+        if CombatLogger.debugMode then
+            timer.scheduleFunction(function()
+                local missionTime = timer.getTime() - CombatLogger.startTime
+                local minutes = math.floor(missionTime / 60)
+                local playerCount = countTable(CombatLogger.knownPlayers)
+                local totalEvents = CombatLogger.stats.events.shots + CombatLogger.stats.events.hits + CombatLogger.stats.events.kills
+                
+                if totalEvents > 0 or playerCount > 0 then
+                    debugMessage(string.format("📊 Status: %dm runtime, %d players, %d events logged", 
+                        minutes, playerCount, totalEvents), 8)
+                end
+                
+                return timer.getTime() + 120 -- Status every 2 minutes
+            end, nil, timer.getTime() + 120)
+        end
+        debugMessage("💾 Auto-flush scheduled (every 30s)", 8)
+        
         logEvent("SYSTEM", "All systems initialized successfully")
+        debugMessage("🎯 Combat Logger fully operational!", 10)
     end)
     
     if not success then
         env.info("COMBAT_LOG: Initialization failed: " .. safeString(error), false)
+        debugMessage("❌ CRITICAL: Initialization failed - " .. safeString(error), 20)
     end
 end
 

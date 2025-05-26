@@ -1,196 +1,210 @@
-# DCS World Combat Logger
+# PyAcmi-Analyzer
 
-A comprehensive Lua script for DCS World that tracks combat events and generates scoreboards for pilots and formations.
+A Python tool for analyzing TACVIEW ACMI files to extract air-to-air combat statistics per pilot.
+
+## Overview
+
+This tool analyzes TACVIEW ACMI files (`.acmi` format) and generates comprehensive air-to-air combat statistics for each pilot in the mission. It provides insights into missile usage, kill/death ratios, survival rates, and coalition performance.
 
 ## Features
 
-- **Combat Event Tracking**
-  - Air-to-air kills
-  - Air-to-ground kills
-  - Naval kills
-  - Pilot deaths, crashes, and ejections
-  - Team kills detection
-  - Takeoffs and landings
-  - Flight time tracking
-
-- **Real-time Feedback**
-  - On-screen kill notifications
-  - In-game scoreboard display via F10 menu
-  - Team kill warnings
-
-- **Data Export**
-  - CSV format logging for all events
-  - JSON export for statistics
-  - Timestamped log files
-
-- **Scoreboard Generation**
-  - Pilot performance rankings
-  - Multiple scoring categories
-  - Automatic score calculation
+- **Pilot Statistics**: Individual pilot performance including missiles fired, kills, deaths, and survival status
+- **Aircraft Analysis**: Aircraft type identification and capability-based missile assignment
+- **Coalition Breakdown**: Performance comparison between different coalitions
+- **Missile Tracking**: Air-to-air missile identification and usage statistics
+- **Export Capabilities**: JSON export for further analysis
+- **Intelligent Estimation**: Smart algorithms to estimate combat results when direct data isn't available
 
 ## Installation
 
-1. Copy `combat_logger.lua` to your DCS mission folder
-2. In the Mission Editor, add a trigger:
-   - **Type**: Mission Start
-   - **Action**: Do Script File
-   - **File**: Select `combat_logger.lua`
+1. Clone or download this repository
+2. Create a virtual environment:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   ```
+3. Install dependencies:
+   ```bash
+   pip install pyacmi constantly
+   ```
 
 ## Usage
 
-### In-Game Menu (F10)
+### Basic Analysis
 
-Once the mission starts, access the Combat Logger menu via F10:
-- **Show Scoreboard**: Display current rankings
-- **Export Stats**: Save statistics to JSON file
-- **Show My Stats**: View personal statistics (requires player identification setup)
-
-### Log Files Location
-
-All logs are saved to:
-```
-DCS World/Logs/
-├── combat_log_YYYYMMDD_HHMMSS.csv
-└── combat_stats_YYYYMMDD_HHMMSS.json
+```bash
+python improved_acmi_analyzer.py path/to/your/file.acmi
 ```
 
-### CSV Log Format
+### Export to JSON
 
-The CSV file contains the following columns:
-- MissionTime (seconds since mission start)
-- Event (KILL, TAKEOFF, LANDING, etc.)
-- Killer name and details
-- Victim name and details
-- Weapon used
-- Additional details
-
-### Scoring System
-
-The default scoring system:
-- Air-to-air kill: +10 points
-- Ground kill: +5 points
-- Naval kill: +7 points
-- Death: -5 points
-- Crash: -3 points
-- Team kill: -20 points
-
-## Configuration
-
-Edit the configuration section in the script:
-
-```lua
-CombatLogger.config = {
-    logPath = lfs.writedir() .. "Logs/",
-    logToFile = true,              -- Enable/disable file logging
-    logToScreen = true,            -- Enable/disable on-screen messages
-    screenMessageDuration = 10,     -- Message display time in seconds
-    trackFriendlyFire = true,      -- Track team kills
-    trackFormations = true,        -- Track formation data
-}
+```bash
+python improved_acmi_analyzer.py path/to/your/file.acmi --output results.json
 ```
 
-## Advanced Usage
+### Command Line Options
 
-### Custom Scoring
+- `acmi_file`: Path to the ACMI file to analyze (required)
+- `--output`, `-o`: Output JSON file for detailed statistics (optional)
 
-Modify the scoring formula in `generateScoreboard()`:
+## Example Output
 
-```lua
-score = (stats.airKills * YOUR_A2A_POINTS + 
-         stats.groundKills * YOUR_A2G_POINTS + 
-         stats.navalKills * YOUR_NAVAL_POINTS) - 
-        (stats.deaths * YOUR_DEATH_PENALTY + 
-         stats.crashes * YOUR_CRASH_PENALTY + 
-         stats.teamKills * YOUR_TK_PENALTY)
+```
+================================================================================
+AIR-TO-AIR COMBAT ANALYSIS REPORT
+================================================================================
+Mission: 2025-05-10 boz-attack
+Date: 2020-06-01T05:00:00
+Duration: 99160 time frames
+Total Objects: 4218
+
+--------------------------------------------------------------------------------
+PILOT STATISTICS
+--------------------------------------------------------------------------------
+
+ENEMIES COALITION:
+----------------------------------------
+Pilot: IAF. Yuval KIZ (SURVIVED)
+  Aircraft: F-4E-45MC
+  Country: xb
+  Group: f4
+  Missiles Fired: 3
+  Missile Types: AIM_120, AIM-9L
+  Estimated Kills: 0
+  Deaths: 0
+  Kill/Death Ratio: 0.00
+  Estimated Hit Rate: 30.0%
+
+[... more pilots ...]
+
+--------------------------------------------------------------------------------
+SUMMARY STATISTICS
+--------------------------------------------------------------------------------
+Total Pilots: 26
+Survivors: 9
+Casualties: 17
+Total Missiles Fired: 22
+Total Estimated Kills: 0
+Total Aircraft Lost: 26
+Overall Estimated Hit Rate: 0.0%
+
+Coalition Breakdown:
+  Enemies:
+    Pilots: 13 (Survivors: 4)
+    Missiles Fired: 21
+    Estimated Kills: 0
+    Aircraft Lost: 12
+    K/D Ratio: 0.00
+    Hit Rate: 0.0%
 ```
 
-### Adding Custom Events
+## How It Works
 
-To track additional events, add new handlers in `registerEventHandlers()`:
+### Data Analysis Process
 
-```lua
-elseif event.id == world.event.S_EVENT_YOUR_EVENT then
-    CombatLogger:onYourEvent(event)
-```
+1. **ACMI File Loading**: Uses the `pyacmi` library to parse TACVIEW files
+2. **Object Categorization**: Separates aircraft, missiles, and other objects
+3. **Pilot Identification**: Maps pilots to their aircraft and survival status
+4. **Missile Assignment**: Intelligently distributes missiles to pilots based on:
+   - Aircraft capabilities (what missiles each aircraft type can carry)
+   - Coalition alignment (Western vs Eastern weapon systems)
+   - Missile types found in the mission
+5. **Kill Estimation**: Estimates kills based on:
+   - Enemy coalition losses
+   - Missile effectiveness assumptions
+   - Pilot missile usage proportions
 
-### Formation Tracking
+### Supported Aircraft Types
 
-The script includes basic formation tracking through group names. For advanced formation analysis, you can extend the `trackUnit()` function to include formation-specific data.
+- **Western Aircraft**: F-16, F-4, F-18, FA-18
+- **Eastern Aircraft**: MiG-21, MiG-23, MiG-25, Su-27
+- **Support Aircraft**: E-3A (AWACS)
 
-## Data Analysis
+### Supported Missile Types
 
-### Using the CSV Export
+- **Western Missiles**: AIM-120 (AMRAAM), AIM-9L/M/X (Sidewinder), AIM-7 (Sparrow)
+- **Eastern Missiles**: R-27 (Alamo), R-73 (Archer), R-77 (Adder), P-24R (Apex)
 
-The CSV file can be imported into:
-- Excel/Google Sheets for analysis
-- Python/R for statistical analysis
-- Database systems for long-term storage
+## Limitations
 
-### Using the JSON Export
+### Data Availability
 
-The JSON file contains structured statistics perfect for:
-- Web-based scoreboards
-- API integration
-- Automated reporting tools
+Due to limitations in the ACMI format and the `pyacmi` library:
 
-Example JSON structure:
+- **Parent-Child Relationships**: Direct missile-to-launcher relationships aren't preserved in the final object data
+- **Timeline Data**: Full timeline analysis would require CSV export, which can be very large for long missions
+- **Hit Confirmation**: Actual missile hits vs. misses aren't directly trackable
+
+### Estimation Approach
+
+The tool uses intelligent estimation algorithms:
+
+- **Missile Distribution**: Based on aircraft capabilities and coalition alignment
+- **Kill Calculation**: Uses statistical models with assumed hit rates (30% default)
+- **Conservative Estimates**: Tends to underestimate rather than overestimate results
+
+## Technical Details
+
+### Dependencies
+
+- `pyacmi`: TACVIEW ACMI file parsing
+- `constantly`: Required by pyacmi
+- Standard Python libraries: `json`, `collections`, `datetime`, `argparse`
+
+### File Structure
+
+- `improved_acmi_analyzer.py`: Main analysis script
+- `acmi_analyzer.py`: Original version (basic implementation)
+- `test_acmi.py`, `explore_*.py`: Development and debugging scripts
+- `README.md`: This documentation
+- `requirements.txt`: Python dependencies
+
+### JSON Export Format
+
+The exported JSON contains:
 ```json
 {
-  "missionTime": 3600.5,
-  "stats": {
-    "Pilot Name": {
-      "airKills": 5,
-      "groundKills": 10,
-      "navalKills": 2,
-      "deaths": 1,
-      "crashes": 0,
-      "ejections": 1,
-      "teamKills": 0,
-      "sorties": 3,
-      "flightTime": 2847.3
+  "mission_info": {
+    "Title": "Mission Name",
+    "ReferenceTime": "2020-06-01T05:00:00",
+    "TimeFrames": 99160,
+    "Objects": 4218
+  },
+  "pilot_statistics": {
+    "PilotName": {
+      "pilot_name": "PilotName",
+      "aircraft_type": "F-16C_50",
+      "coalition": "Enemies",
+      "missiles_fired": 3,
+      "air_to_air_kills": 1,
+      "deaths": 0,
+      "survived": true,
+      "missile_types_used": ["AIM_120", "AIM-9L"]
     }
-  }
+  },
+  "analysis_timestamp": "2025-01-XX...",
+  "analysis_notes": [...]
 }
 ```
 
-## Troubleshooting
+## Future Improvements
 
-### Script Not Loading
-- Ensure the script path is correct in the trigger
-- Check DCS.log for Lua errors
-- Verify file permissions in the DCS folder
+- **Timeline Analysis**: Full CSV export processing for precise missile tracking
+- **Enhanced Hit Detection**: Better algorithms for determining actual hits
+- **Weapon System Modeling**: More detailed aircraft-weapon compatibility
+- **Performance Metrics**: Additional statistics like engagement ranges, altitudes
+- **Visualization**: Charts and graphs for combat analysis
+- **Multi-Mission Analysis**: Batch processing and comparison tools
 
-### "Attempt to index global 'os' a nil value" Error
-- This is expected - DCS restricts the `os` module for security
-- The script uses `timer.getAbsTime()` instead of `os.date()`
-- File names use mission time instead of real-world timestamps
+## Contributing
 
-### No Logs Created
-- Check if `lfs.writedir()` path exists
-- Ensure DCS has write permissions
-- Look for error messages in DCS.log
-
-### Missing Kills
-- Some kills might not register if the killer disconnects immediately
-- AI vs AI kills are tracked but pilot name will be the unit name
-- Delayed explosions might not attribute kills correctly
-
-## Performance Considerations
-
-- The script is optimized for missions with up to 200 active units
-- Large CSV files may impact performance if kept open
-- Consider periodic exports and log rotation for long missions
-
-## Future Enhancements
-
-Potential improvements:
-- Database integration
-- Web-based real-time scoreboard
-- Advanced formation statistics
-- Weapon accuracy tracking
-- Damage dealt tracking
-- Mission objective scoring
+Feel free to submit issues, feature requests, or pull requests to improve the analyzer.
 
 ## License
 
-This script is provided as-is for use in DCS World missions. Feel free to modify and distribute with attribution. 
+This project is provided as-is for educational and analysis purposes.
+
+## Acknowledgments
+
+- TACVIEW for the ACMI format specification
+- The `pyacmi` library developers for ACMI file parsing capabilities 
